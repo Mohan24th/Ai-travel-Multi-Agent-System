@@ -1,308 +1,124 @@
-````md
+
 # AI Travel Planning System using LangGraph + MCP
 
-A multi-agent AI travel planning system built with LangGraph, Model Context Protocol (MCP), Groq, Tavily, AviationStack, OpenWeather, and Streamlit.
+This project is a Real-World Multi-Agent AI System built using **LangGraph** and the **Model Context Protocol (MCP)**.
 
-The application accepts a natural-language travel request and coordinates specialized agents to gather travel information and generate a complete day-by-day itinerary.
+The system uses 4 AI agents that work together to plan a complete trip automatically. Tool access is provided through three MCP servers (Tavily, AviationStack, and a custom OpenWeather server) instead of in-process function calls.
 
 ## Live Demo
 
 https://ai-travel-multi-agent-system.streamlit.app/
 
-## Overview
-
-Instead of relying on a single LLM call, the system divides the travel-planning workflow into specialized agents:
-
-1. Flight Agent
-2. Hotel Agent
-3. Weather Agent
-4. Itinerary Agent
-
-LangGraph manages the state and execution flow between these agents, while MCP provides a modular interface for external tools and services.
-
 ## Features
 
-- Flight information and airline recommendations
-- Hotel and accommodation search
-- Current weather and forecast information
-- Day-by-day itinerary generation
-- Budget-aware travel planning
-- Transportation and food recommendations
-- LangGraph-based agent orchestration
-- MCP-based external tool integration
-- In-memory conversation checkpointing
-- Streamlit web interface
-- Markdown itinerary export
-- Cloud deployment using Streamlit Community Cloud
+- ✈️ Flight Search Agent (AviationStack via MCP)
+- 🏨 Hotel Search Agent (Tavily via MCP)
+- 🌦️ Weather Agent (custom OpenWeather MCP server)
+- 🗓️ Itinerary Planning Agent
+- 🧠 In-memory state management using LangGraph `MemorySaver`
+- 💻 Streamlit Web Interface
+- 🔌 Pluggable MCP-based tool layer
 
-## Architecture
+---
+
+# Tech Stack
+
+- **Orchestration:** LangGraph
+- **LLM:** Groq — `openai/gpt-oss-120b`
+- **Memory:** LangGraph `MemorySaver` (in-memory)
+- **Tooling (MCP):**
+  - Tavily MCP (HTTP transport)
+  - AviationStack MCP (local stdio)
+  - Custom OpenWeather MCP server (local stdio)
+- **MCP client:** `langchain-mcp-adapters` (`MultiServerMCPClient`)
+- **Frontend:** Streamlit
+
+---
+
+# Architecture
 
 ```text
-                         User Request
-                              |
-                              v
-                       +--------------+
-                       |  LangGraph   |
-                       |    Graph     |
-                       +------+-------+
-                              |
-                              v
-                       +--------------+
-                       | Flight Agent |
-                       +------+-------+
-                              |
-                              v
-                       +--------------+
-                       | Hotel Agent  |
-                       +------+-------+
-                              |
-                              v
-                       +--------------+
-                       |Weather Agent |
-                       +------+-------+
-                              |
-                              v
-                     +------------------+
-                     | Itinerary Agent  |
-                     +--------+---------+
-                              |
-                              v
-                       Final Travel Plan
+┌────────────┐
+│  User Query │
+└─────┬──────┘
+      ▼
+┌────────────┐
+│ LangGraph  │
+│   Graph    │
+└─────┬──────┘
+      │
+      ├── flight_agent    ──▶ AviationStack MCP (stdio)
+      │
+      ├── hotel_agent     ──▶ Tavily MCP        (HTTP)
+      │
+      ├── weather_agent   ──▶ OpenWeather MCP   (stdio, custom)
+      │
+      └── itinerary_agent ──▶ Groq GPT OSS 120B
 ````
 
-External tools are accessed through the MCP layer:
+The agents execute through the following workflow:
 
 ```text
-                    Agent
-                      |
-                      v
-                 MCP Client
-                      |
-          +-----------+-----------+
-          |           |           |
-          v           v           v
-       Tavily    AviationStack  OpenWeather
+START
+  ↓
+flight_agent
+  ↓
+hotel_agent
+  ↓
+weather_agent
+  ↓
+itinerary_agent
+  ↓
+END
 ```
 
-## Agent Workflow
+All MCP wiring lives in `mcp_client.py`. To add or swap a tool, edit the server configuration there — no agent code change is required.
 
-### 1. Flight Agent
+---
 
-The Flight Agent handles flight-related travel information.
+# Step 1: Create Python Environment
 
-It uses AviationStack data to provide:
-
-* Likely departure airport
-* Likely arrival airport
-* Airlines serving the route
-* Typical flight duration
-* Estimated airfare range
-* Peak-season pricing considerations
-* Booking recommendations
-
-The agent is instructed not to invent specific flight numbers or represent estimated prices as confirmed prices.
-
-### 2. Hotel Agent
-
-The Hotel Agent uses Tavily to search for accommodation information based on the user's travel request.
-
-It provides:
-
-* Hotel recommendations
-* Recommended areas to stay
-* Approximate accommodation costs
-* Location-based suggestions
-* Accommodation advice
-
-### 3. Weather Agent
-
-The Weather Agent extracts the destination from the user's request and retrieves weather information.
-
-It provides:
-
-* Current weather
-* Weather forecast
-* Destination-specific conditions
-
-The weather information is passed to the itinerary agent so the final plan can account for expected conditions.
-
-### 4. Itinerary Agent
-
-The Itinerary Agent combines the information produced by the previous agents:
-
-```text
-User Query
-    +
-Flight Information
-    +
-Hotel Information
-    +
-Weather Information
-```
-
-It then generates a complete travel plan containing:
-
-* Day-by-day activities
-* Approximate timing
-* Food recommendations
-* Transportation guidance
-* Budget estimates
-* Travel tips
-* Weather considerations
-* Important assumptions
-
-## MCP Integration
-
-The project uses the Model Context Protocol to separate agent logic from external tool execution.
-
-The MCP client is implemented using `MultiServerMCPClient` from `langchain-mcp-adapters`.
-
-Current integrations include:
-
-| Service       | Purpose              | Transport         |
-| ------------- | -------------------- | ----------------- |
-| Tavily        | Web and hotel search | Streamable HTTP   |
-| AviationStack | Aviation information | MCP               |
-| OpenWeather   | Weather and forecast | Custom MCP server |
-
-MCP configuration and tool wrappers are maintained in:
-
-```text
-mcp_client.py
-```
-
-This makes the tool layer modular and allows external services to be changed without significantly modifying the agent workflow.
-
-## LLM
-
-The project currently uses Groq with GPT OSS 120B.
-
-```python
-from langchain_groq import ChatGroq
-
-llm = ChatGroq(
-    model="openai/gpt-oss-120b",
-    temperature=0
-)
-```
-
-The LLM is used for:
-
-* Travel information interpretation
-* Destination extraction
-* Flight recommendations
-* Itinerary generation
-* Combining information from multiple agents
-
-## Memory
-
-The current version uses LangGraph's `MemorySaver` for in-memory checkpointing.
-
-```python
-from langgraph.checkpoint.memory import MemorySaver
-
-checkpointer = MemorySaver()
-
-app = graph.compile(
-    checkpointer=checkpointer
-)
-```
-
-Each execution uses a `thread_id` to identify the conversation state.
-
-The current deployed version does not require PostgreSQL.
-
-PostgreSQL-based persistent memory was part of an earlier implementation and can be added later as an upgrade.
-
-## Technology Stack
-
-| Component           | Technology                |
-| ------------------- | ------------------------- |
-| Language            | Python                    |
-| Agent Orchestration | LangGraph                 |
-| LLM                 | Groq GPT OSS 120B         |
-| LLM Framework       | LangChain                 |
-| Tool Protocol       | Model Context Protocol    |
-| MCP Client          | langchain-mcp-adapters    |
-| Web Search          | Tavily                    |
-| Flight Data         | AviationStack             |
-| Weather Data        | OpenWeather               |
-| Memory              | LangGraph MemorySaver     |
-| Frontend            | Streamlit                 |
-| Deployment          | Streamlit Community Cloud |
-
-## Project Structure
-
-```text
-AI-travel-multi-agent-system/
-|
-├── main.py
-|   └── LangGraph state, agents and workflow
-|
-├── frontend.py
-|   └── Streamlit web interface
-|
-├── mcp_client.py
-|   └── MCP client and tool integrations
-|
-├── custom_weather_mcp_server.py
-|   └── Custom OpenWeather MCP server
-|
-├── aviationstack-mcp/
-|   └── AviationStack MCP implementation
-|
-├── requirements.txt
-|
-├── .env
-|
-└── README.md
-```
-
-## Local Setup
-
-### 1. Clone the repository
+Open the terminal inside the project folder and run:
 
 ```bash
-git clone https://github.com/Mohan24th/Ai-travel---Multi-Agent-System.git
-
-cd Ai-travel---Multi-Agent-System
+python -m venv langgraph_env3
 ```
 
-### 2. Create a virtual environment
+Activate it.
+
+**macOS / Linux**
 
 ```bash
-python -m venv ai_env
+source langgraph_env3/bin/activate
 ```
 
-Activate the environment.
-
-macOS / Linux:
+**Windows**
 
 ```bash
-source ai_env/bin/activate
+langgraph_env3\Scripts\activate
 ```
 
-Windows:
+---
+
+# Step 2: Install Dependencies
 
 ```bash
-ai_env\Scripts\activate
+pip install langgraph langchain langchain-openai langchain-groq langchain-community langchain-tavily \
+            langchain-mcp-adapters mcp python-dotenv \
+            tavily-python requests streamlit
 ```
 
-### 3. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-If the AviationStack MCP implementation is included as a local package:
+The AviationStack MCP server (`aviationstack-mcp/`) is a sibling sub-repo — install it inside the same environment:
 
 ```bash
 pip install -e ./aviationstack-mcp
 ```
 
-### 4. Configure environment variables
+---
 
-Create a `.env` file in the project root:
+# Step 3: Setup `.env` File
+
+Create a `.env` file inside the project folder:
 
 ```env
 GROQ_API_KEY=your_groq_api_key
@@ -311,204 +127,173 @@ AVIATIONSTACK_API_KEY=your_aviationstack_api_key
 OPENWEATHER_API_KEY=your_openweather_api_key
 ```
 
-Do not commit `.env` or API keys to the repository.
+The MCP client loads these environment variables at startup and raises an error if required keys are missing.
 
-## Running the Application
+---
 
-### CLI
+# Step 4: Get API Keys
+
+| Service       | URL                                                              |
+| ------------- | ---------------------------------------------------------------- |
+| Groq          | [https://console.groq.com](https://console.groq.com)             |
+| Tavily        | [https://tavily.com](https://tavily.com)                         |
+| AviationStack | [https://aviationstack.com](https://aviationstack.com)           |
+| OpenWeather   | [https://openweathermap.org/api](https://openweathermap.org/api) |
+
+---
+
+# Step 5: MCP Servers
+
+The system uses three MCP servers, configured in `mcp_client.py`.
+
+### 5.1 Tavily MCP (HTTP)
+
+Remote server, no local installation required.
+
+```python
+"tavily": {
+    "transport": "streamable_http",
+    "url": f"https://mcp.tavily.com/mcp/?tavilyApiKey={TAVILY_API_KEY}"
+}
+```
+
+### 5.2 AviationStack MCP (local stdio)
+
+Local Python package launched as a subprocess.
+
+```python
+"aviationstack": {
+    "transport": "stdio",
+    "command": "/path/to/your/venv/bin/python",
+    "args": ["-m", "aviationstack_mcp", "mcp", "run"],
+    "env": {
+        "AVIATIONSTACK_API_KEY": AVIATION_STACK_API_KEY
+    }
+}
+```
+
+Make sure `aviationstack-mcp/` is installed in the same Python environment used by the command.
+
+### 5.3 Custom OpenWeather MCP server (local stdio)
+
+A FastMCP server in `custom_weather_mcp_server.py` exposing:
+
+```text
+get_current_weather
+get_forecast
+```
+
+Example configuration:
+
+```python
+"weather": {
+    "transport": "stdio",
+    "command": "/path/to/your/venv/bin/python",
+    "args": ["/absolute/path/to/custom_weather_mcp_server.py"],
+    "env": {
+        "OPENWEATHER_API_KEY": OPENWEATHER_API_KEY
+    }
+}
+```
+
+> **macOS / Linux:** use the virtual environment's `bin/python` path.
+> **Windows:** use the environment's `Scripts\python.exe` path.
+
+---
+
+# Step 6: Run the Application
+
+**Terminal (CLI)**
 
 ```bash
 python main.py
 ```
 
-Example:
-
-```text
-Enter travel request: 7 day plan for Goa
-```
-
-### Streamlit
+**Streamlit Web App**
 
 ```bash
 streamlit run frontend.py
 ```
 
-## Example Prompts
+**Example prompt**
 
 ```text
-Plan a 7-day Japan trip under ₹2 lakhs.
+Plan a complete 7 days Japan trip including flights, hotels and sightseeing under 2 lakhs.
 ```
+
+---
+
+# Project Workflow
+
+1. **flight_agent** — pulls airport and airline data from the AviationStack MCP, then asks the LLM to summarize likely routes, durations, and fares.
+2. **hotel_agent** — queries the Tavily MCP for hotel recommendations.
+3. **weather_agent** — calls the custom OpenWeather MCP for current weather and forecast at the destination.
+4. **itinerary_agent** — synthesizes flights + hotels + weather into a day-by-day travel plan.
+5. **MemorySaver** — maintains LangGraph state in memory using a `thread_id` during application execution.
+
+---
+
+# Project Structure
 
 ```text
-Create a 5-day Goa trip including hotels,
-weather and sightseeing.
+.
+├── main.py                       # LangGraph graph, state, agents
+├── mcp_client.py                 # MultiServerMCPClient + tool wrappers
+├── custom_weather_mcp_server.py  # FastMCP server (OpenWeather)
+├── aviationstack-mcp/            # Sibling sub-repo (AviationStack MCP)
+├── frontend.py                   # Streamlit UI
+├── tools/                        # Legacy in-process tools (kept for reference)
+├── travel_plans/                 # Saved itineraries (auto-generated)
+└── .env                          # API keys
 ```
+
+---
+
+# Troubleshooting
+
+**`TypeError: expected string or bytes-like object, got 'NoneType'` from `langchain_mcp_adapters.sessions`**
+
+One of the environment variables (`TAVILY_API_KEY`, `AVIATIONSTACK_API_KEY`, `OPENWEATHER_API_KEY`) is missing or empty.
+
+Verify your `.env` file or Streamlit Cloud Secrets.
+
+---
+
+**MCP server fails to start on macOS / Linux**
+
+The most common cause is an incorrect Python path in `mcp_client.py`.
+
+Make sure the `command` points to the Python executable inside your active virtual environment.
+
+For example:
 
 ```text
-Plan a 10-day Thailand trip with budget
-accommodation and sightseeing.
+/Users/you/venvs/ai_env/bin/python
 ```
+
+On Windows:
 
 ```text
-Create a weekend trip to Dubai with
-hotel recommendations and activities.
+C:\path\to\venv\Scripts\python.exe
 ```
 
-## Example Output
+---
 
-The generated travel plan can include:
+**Streamlit deployment**
+
+For Streamlit Cloud, configure the required API keys under:
 
 ```text
-Flight Recommendations
-
-Hotel Recommendations
-
-Current Weather and Forecast
-
-Day-by-Day Itinerary
-
-Budget Breakdown
-
-Food Recommendations
-
-Transportation Guidance
-
-Packing Suggestions
-
-Money-Saving Tips
+App → Settings → Secrets
 ```
 
-## Reliability
+The current deployed application uses `MemorySaver`, so a PostgreSQL `DATABASE_URL` is not required.
 
-The agents are designed to distinguish between confirmed information, estimates, recommendations, and assumptions.
+---
 
-For example, the Flight Agent is instructed to:
-
-* Avoid inventing specific flight numbers
-* Avoid claiming real-time availability without supporting tool data
-* Clearly label estimated prices
-* State when important information is unavailable
-
-The Itinerary Agent similarly treats flight prices, hotel prices, travel times, and other generated values as estimates unless they are explicitly confirmed by tool data.
-
-## Deployment
-
-The application is deployed using Streamlit Community Cloud.
-
-Live application:
+# Live Application
 
 [https://ai-travel-multi-agent-system.streamlit.app/](https://ai-travel-multi-agent-system.streamlit.app/)
-
-The Streamlit entry point is:
-
-```text
-frontend.py
-```
-
-Configure the following secrets in Streamlit Cloud:
-
-```toml
-GROQ_API_KEY = "your_key"
-TAVILY_API_KEY = "your_key"
-AVIATIONSTACK_API_KEY = "your_key"
-OPENWEATHER_API_KEY = "your_key"
-```
-
-`DATABASE_URL` is not required by the current deployed version because the application uses `MemorySaver`.
-
-## Future Improvements
-
-Possible future extensions include:
-
-* Parallel execution of independent agents
-* Dynamic router agent
-* Dedicated budget optimization agent
-* Real-time flight availability
-* Real-time hotel availability
-* Persistent PostgreSQL memory
-* User authentication
-* Saved travel plans
-* Maps and route optimization
-* PDF itinerary generation
-* Calendar integration
-* Booking links
-* User-specific travel preferences
-* Final itinerary validation agent
-
-A future architecture could evolve toward:
-
-```text
-                         User Query
-                              |
-                              v
-                        Router Agent
-                              |
-             +----------------+----------------+
-             |                |                |
-             v                v                v
-        Flight Agent     Hotel Agent     Weather Agent
-             |                |                |
-             +----------------+----------------+
-                              |
-                              v
-                       Budget Agent
-                              |
-                              v
-                     Itinerary Agent
-                              |
-                              v
-                    Validation Agent
-                              |
-                              v
-                       Final Plan
-```
-
-## Project Status
-
-| Component                  | Status    |
-| -------------------------- | --------- |
-| LangGraph orchestration    | Completed |
-| Flight Agent               | Completed |
-| Hotel Agent                | Completed |
-| Weather Agent              | Completed |
-| Itinerary Agent            | Completed |
-| Groq GPT OSS 120B          | Completed |
-| MCP integration            | Completed |
-| Tavily integration         | Completed |
-| AviationStack integration  | Completed |
-| OpenWeather integration    | Completed |
-| Streamlit frontend         | Completed |
-| In-memory checkpointing    | Completed |
-| Streamlit Cloud deployment | Completed |
-| Persistent memory          | Planned   |
-| Real-time booking          | Planned   |
-| Authentication             | Planned   |
-| Parallel agents            | Planned   |
-
-## Author
-
-**Mohan**
-
-Computer Science / AI-ML Engineering Student
-
-Areas of interest:
-
-* Artificial Intelligence
-* Machine Learning
-* Generative AI
-* Multi-Agent Systems
-* LangGraph
-* MCP
-* Backend Engineering
-* LLM Applications
-
-## Live Demo
-
-[https://ai-travel-multi-agent-system.streamlit.app/](https://ai-travel-multi-agent-system.streamlit.app/)
-
-## Repository
-
-[https://github.com/Mohan24th/Ai-travel---Multi-Agent-System](https://github.com/Mohan24th/Ai-travel---Multi-Agent-System)
 
 ```
 ```

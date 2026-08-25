@@ -1,33 +1,31 @@
-# LangGraph Multi-Agent Travel Booking System
-# Streamlit-friendly version with in-memory LangGraph memory
+# ============================================================
+# AI TRAVEL BOOKING SYSTEM
+# LangGraph Multi-Agent Backend
+# In-memory checkpointing for Streamlit Cloud
+# ============================================================
 
-import os
-from typing import TypedDict, Annotated
-import operator
 import asyncio
-import uuid
+import operator
+from typing import Annotated, TypedDict
 
 from dotenv import load_dotenv
 
-from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import MemorySaver
-
 from langchain_core.messages import (
+    AIMessage,
     AnyMessage,
     HumanMessage,
-    AIMessage,
     SystemMessage,
 )
-
 from langchain_groq import ChatGroq
 
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
+
 from mcp_client import (
-    tavily_mcp_search,
-    get_airports,
-    get_airlines,
     aviation_mcp_call,
     extract_destination,
     forecast_mcp_search,
+    tavily_mcp_search,
     weather_mcp_search,
 )
 
@@ -45,7 +43,7 @@ load_dotenv(override=True)
 
 llm = ChatGroq(
     model="openai/gpt-oss-120b",
-    temperature=0
+    temperature=0,
 )
 
 
@@ -74,7 +72,7 @@ class TravelState(TypedDict):
 # ============================================================
 
 FLIGHT_AGENT_PROMPT = """
-You are a travel flight expert.
+You are an expert travel flight planner.
 
 User Query:
 {query}
@@ -85,44 +83,41 @@ Airport Information:
 Airline Information:
 {airline_data}
 
-Generate:
+Provide:
 
 1. Likely departure airport
 2. Likely arrival airport
-3. Airlines serving this route
+3. Airlines serving the route
 4. Typical flight duration
 5. Estimated airfare range
-6. Peak season pricing warning
+6. Peak-season pricing warning
 7. Booking advice
 
-Important:
-- Do not invent specific flight numbers.
-- Do not claim that a flight is currently available unless the tool data confirms it.
-- Clearly label estimates as estimates.
-- If the user's departure city is unknown, say that it is unknown.
+Rules:
 
-Return concise travel guidance.
+- Do NOT invent specific flight numbers.
+- Do NOT claim a flight is currently available unless tool
+  information confirms it.
+- Clearly label estimated prices as estimates.
+- If departure location is unknown, say that it is unknown.
+- Keep the response concise.
 """
 
 
 def flight_agent(state: TravelState):
 
-    print("\nINSIDE FLIGHT AGENT\n")
+    print("INSIDE FLIGHT AGENT")
 
     query = state["user_query"]
 
     try:
 
         airports = asyncio.run(
-            aviation_mcp_call(
-                "list_airports"
-            )
+            aviation_mcp_call("list_airports")
         )
 
         airlines = asyncio.run(
-            aviation_mcp_call(
-                "list_airlines"
-            )
+            aviation_mcp_call("list_airlines")
         )
 
         prompt = FLIGHT_AGENT_PROMPT.format(
@@ -219,10 +214,12 @@ def weather_agent(state: TravelState):
         )
 
         weather_results = f"""
-Current Weather:
+### Current Weather
+
 {weather_data}
 
-Forecast:
+### Forecast
+
 {forecast_data}
 """
 
@@ -252,29 +249,32 @@ def itinerary_agent(state: TravelState):
     prompt = f"""
 Create a detailed travel itinerary.
 
-User Query:
+USER REQUEST:
 {state['user_query']}
 
-Flight Results:
+FLIGHT INFORMATION:
 {state['flight_results']}
 
-Hotel Results:
+HOTEL INFORMATION:
 {state['hotel_results']}
 
-Weather Information:
+WEATHER INFORMATION:
 {state['weather_results']}
 
 Requirements:
 
 - Create a practical day-by-day itinerary.
-- Consider the weather information.
-- Use the flight information only as guidance.
-- Do not invent specific flight numbers.
-- Do not present estimated prices as confirmed prices.
+- Consider the weather.
+- Include sightseeing.
+- Include food recommendations.
+- Include transportation guidance.
+- Include approximate timing.
+- Use flight information only as guidance.
+- Do NOT invent specific flight numbers.
+- Do NOT present estimated prices as confirmed prices.
 - Clearly distinguish recommendations from confirmed information.
-- Include useful activities, food suggestions, transportation guidance,
-  and approximate timing.
-- If important information is missing, state the assumption.
+- Mention assumptions when important information is missing.
+- Make the final response easy to read using Markdown.
 """
 
     try:
@@ -318,117 +318,68 @@ Requirements:
 graph = StateGraph(TravelState)
 
 
-# Add agents
 graph.add_node(
     "flight_agent",
-    flight_agent
+    flight_agent,
 )
 
 graph.add_node(
     "hotel_agent",
-    hotel_agent
+    hotel_agent,
 )
 
 graph.add_node(
     "weather_agent",
-    weather_agent
+    weather_agent,
 )
 
 graph.add_node(
     "itinerary_agent",
-    itinerary_agent
+    itinerary_agent,
 )
 
 
-# Workflow
+# ============================================================
+# WORKFLOW
+# ============================================================
+
 graph.add_edge(
     START,
-    "flight_agent"
+    "flight_agent",
 )
 
 graph.add_edge(
     "flight_agent",
-    "hotel_agent"
+    "hotel_agent",
 )
 
 graph.add_edge(
     "hotel_agent",
-    "weather_agent"
+    "weather_agent",
 )
 
 graph.add_edge(
     "weather_agent",
-    "itinerary_agent"
+    "itinerary_agent",
 )
 
 graph.add_edge(
     "itinerary_agent",
-    END
+    END,
 )
 
 
 # ============================================================
-# IN-MEMORY CHECKPOINTER
+# IN-MEMORY CHECKPOINT
 # ============================================================
 
-# No PostgreSQL required.
-#
-# This stores LangGraph state in memory while
-# the application is running.
+# No PostgreSQL.
+# No psycopg.
+# No DATABASE_URL.
 
 checkpointer = MemorySaver()
 
 
-# Compile graph
 app = graph.compile(
-    checkpointer=checkpointer
+    checkpointer=checkpointer,
 )
-
-
-# ============================================================
-# CLI MODE
-# ============================================================
-
-if __name__ == "__main__":
-
-    config = {
-        "configurable": {
-            "thread_id": str(uuid.uuid4())
-        }
-    }
-
-    user_input = input(
-        "Enter travel request: "
-    )
-
-    result = app.invoke(
-        {
-            "messages": [
-                HumanMessage(
-                    content=user_input
-                )
-            ],
-
-            "user_query": user_input,
-
-            "flight_results": "",
-
-            "hotel_results": "",
-
-            "weather_results": "",
-
-            "itinerary": "",
-
-            "llm_calls": 0,
-        },
-
-        config=config
-    )
-
-    print(
-        "\nFINAL RESPONSE:\n"
-    )
-
-    print(
-        result["itinerary"]
-    )

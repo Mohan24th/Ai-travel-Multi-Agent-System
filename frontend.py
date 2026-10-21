@@ -4,7 +4,7 @@
 # ============================================================
 
 import os
-from datetime import datetime
+from datetime import date, datetime, timedelta
 import uuid
 
 import streamlit as st
@@ -793,6 +793,7 @@ for col, (name, img_url) in zip(cols, DESTINATIONS):
 st.markdown("<br>", unsafe_allow_html=True)
 
 
+
 # ============================================================
 # TRIP INPUT
 # ============================================================
@@ -800,12 +801,11 @@ st.markdown("<br>", unsafe_allow_html=True)
 st.markdown(
     """
     <div class="input-label">
-        🗺️ Describe your trip
+        🗺️ Plan Your Trip
     </div>
     """,
     unsafe_allow_html=True,
 )
-
 
 QUICK = [
     "7-day Japan under ₹2L",
@@ -814,57 +814,143 @@ QUICK = [
     "Bali backpacking 10 days",
 ]
 
-
-qcols = st.columns(
-    len(QUICK)
-)
-
-
-# Use session state so quick buttons actually
-# populate the text area.
-
 if "quick_query" not in st.session_state:
-
     st.session_state.quick_query = ""
 
+if "user_query_input" not in st.session_state:
+    st.session_state.user_query_input = st.session_state.quick_query
 
-for qc, label in zip(
-    qcols,
-    QUICK,
-):
+qcols = st.columns(len(QUICK))
 
+for qc, quick_label in zip(qcols, QUICK):
     with qc:
-
         if st.button(
-            label,
-            key=f"q_{label}",
+            quick_label,
+            key=f"q_{quick_label}",
             use_container_width=True,
         ):
+            st.session_state.quick_query = quick_label
+            st.session_state.user_query_input = quick_label
 
-            st.session_state.quick_query = label
+with st.form("travel_planning_form"):
 
+    user_query = st.text_area(
+        "Describe your trip",
+        key="user_query_input",
+        placeholder=(
+            "e.g. A relaxed 5-day Paris trip with museums, "
+            "local food, sightseeing and comfortable hotels"
+        ),
+        height=100,
+    )
 
-user_query = st.text_area(
-    "",
-    value=st.session_state.quick_query,
-    placeholder=(
-        "e.g. Plan a complete 7-day Japan trip "
-        "including flights, hotels and sightseeing "
-        "under ₹2 lakhs"
-    ),
-    height=100,
-    label_visibility="collapsed",
-)
+    st.markdown("#### 📍 Departure & travelers")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        departure_city = st.text_input(
+            "Departure city",
+            placeholder="e.g. Hyderabad",
+            help="Leave blank if you haven't decided yet.",
+        )
+
+    with col2:
+        travelers = st.number_input(
+            "Number of travelers",
+            min_value=1,
+            max_value=50,
+            value=1,
+            step=1,
+        )
+
+    st.markdown("#### 📅 Travel dates")
+
+    default_start = date.today() + timedelta(days=7)
+    default_end = default_start + timedelta(days=4)
+
+    date_col1, date_col2 = st.columns(2)
+
+    with date_col1:
+        start_date = st.date_input(
+            "Departure date",
+            value=default_start,
+            min_value=date.today(),
+        )
+
+    with date_col2:
+        end_date = st.date_input(
+            "Return date",
+            value=default_end,
+            min_value=date.today(),
+        )
+
+    st.markdown("#### 💰 Budget")
+
+    budget = st.number_input(
+        "Total trip budget (INR)",
+        min_value=0,
+        max_value=100_000_000,
+        value=0,
+        step=10_000,
+        help="Enter 0 if you haven't decided on a budget.",
+    )
+
+    st.caption(
+        "Dates are prefilled for convenience. "
+        "Change them to match your actual trip. "
+        "Budget 0 means no budget was specified."
+    )
+
+    generate = st.form_submit_button(
+        "🚀 Generate My Travel Plan",
+        use_container_width=True,
+    )
 
 
 # ============================================================
-# GENERATE BUTTON
+# BUILD EXPLICIT TRAVEL REQUEST
 # ============================================================
 
-generate = st.button(
-    "🚀  Generate My Travel Plan",
-    use_container_width=True,
-)
+planning_query = ""
+
+if generate and user_query.strip() and end_date >= start_date:
+    trip_days = (end_date - start_date).days + 1
+
+    departure_text = (
+        departure_city.strip()
+        if departure_city.strip()
+        else "Not specified — do not assume an origin"
+    )
+
+    budget_text = (
+        f"₹{budget:,.0f} INR total for the trip"
+        if budget > 0
+        else "Not specified"
+    )
+
+    planning_query = f"""
+TRIP REQUEST
+{user_query.strip()}
+
+CONFIRMED USER-PROVIDED PLANNING DETAILS
+- Destination: Identify from the trip request. If ambiguous, ask.
+- Departure city: {departure_text}
+- Start date: {start_date.isoformat()}
+- Return date: {end_date.isoformat()}
+- Trip duration: {trip_days} calendar day(s), counting both dates
+- Number of travelers: {travelers}
+- Total budget: {budget_text}
+
+PLANNING RULES
+- Use the dates and traveler count above.
+- Do not invent a departure city, airport, booking, or reservation.
+- If the departure city is not specified, clearly say so.
+- Keep the itinerary within the selected date range.
+- Do not add extra travel days outside the selected dates.
+- Label unverified prices, schedules, and availability as estimates.
+- If the request conflicts with the selected dates, explain the conflict.
+"""
 
 
 # ============================================================
@@ -907,6 +993,9 @@ if generate:
         st.warning(
             "Please describe your trip first."
         )
+    elif end_date < start_date:
+
+        st.warning("Please select a valid travel date range.")
 
     else:
 
@@ -929,11 +1018,11 @@ if generate:
 
             "messages": [
                 HumanMessage(
-                    content=user_query
+                    content=planning_query
                 )
             ],
 
-            "user_query": user_query,
+            "user_query": planning_query,
 
             "flight_results": "",
 
@@ -991,177 +1080,64 @@ if generate:
             ):
 
                 for chunk in app.stream(
-
                     initial_state,
-
                     config=config,
-
                     stream_mode="updates",
-
                 ):
-
                     for node_name, state_update in chunk.items():
-
-                        icon, label = AGENT_META.get(
-                            node_name,
-                            ("🔧", node_name),
-                        )
-
-
-                        with st.status(
-                            f"{icon}  {label}",
-                            state="complete",
-                            expanded=True,
-                        ):
-
-                            # ==================================
-                            # FLIGHT
-                            # ==================================
-
-                            if node_name == "flight_agent":
-
-                                text = state_update.get(
-                                    "flight_results",
-                                    "",
-                                )
-
-                                collected[
-                                    "flight_results"
-                                ] = text
-
-                                st.markdown(
-                                    text
-                                    or "_No flight data returned._"
-                                )
-
-
-                            # ==================================
-                            # HOTEL
-                            # ==================================
-
-                            elif node_name == "hotel_agent":
-
-                                text = state_update.get(
-                                    "hotel_results",
-                                    "",
-                                )
-
-                                collected[
-                                    "hotel_results"
-                                ] = text
-
-                                st.markdown(
-                                    text
-                                    or "_No hotel data returned._"
-                                )
-
-
-                            # ==================================
-                            # WEATHER
-                            # ==================================
-
-                            elif node_name == "weather_agent":
-
-                                text = state_update.get(
-                                    "weather_results",
-                                    "",
-                                )
-
-                                collected[
-                                    "weather_results"
-                                ] = text
-
-                                st.markdown(
-                                    text
-                                    or "_No weather data returned._"
-                                )
-
-
-                            # ==================================
-                            # ITINERARY
-                            # ==================================
-
-                            elif node_name == "itinerary_agent":
-
-                                text = state_update.get(
-                                    "itinerary",
-                                    "",
-                                )
-
-                                collected[
-                                    "itinerary"
-                                ] = text
-
-                                st.markdown(
-                                    text
-                                    or "_No itinerary generated._"
-                                )
-
-
-                            # ==================================
-                            # LLM CALL COUNT
-                            # ==================================
-
-                            collected[
-                                "llm_calls"
-                            ] = state_update.get(
-                                "llm_calls",
-                                collected[
-                                    "llm_calls"
-                                ],
+                        if node_name == "flight_agent":
+                            collected["flight_results"] = state_update.get(
+                                "flight_results", ""
                             )
 
+                        elif node_name == "hotel_agent":
+                            collected["hotel_results"] = state_update.get(
+                                "hotel_results", ""
+                            )
 
-            # ==================================================
-            # METRICS
-            # ==================================================
+                        elif node_name == "weather_agent":
+                            collected["weather_results"] = state_update.get(
+                                "weather_results", ""
+                            )
 
+                        elif node_name == "itinerary_agent":
+                            collected["itinerary"] = state_update.get(
+                                "itinerary", ""
+                            )
+
+                        collected["llm_calls"] = state_update.get(
+                            "llm_calls", collected["llm_calls"]
+                        )
+
+            # Agent outputs are hidden until the user opens each expander.
             st.markdown(
-                f"""
-                <div class="metric-row">
-
-                    <div class="metric-box">
-
-                        <div class="metric-val">
-                            4
-                        </div>
-
-                        <div class="metric-lbl">
-                            Agents Run
-                        </div>
-
-                    </div>
-
-
-                    <div class="metric-box">
-
-                        <div class="metric-val">
-                            {collected["llm_calls"]}
-                        </div>
-
-                        <div class="metric-lbl">
-                            LLM Calls
-                        </div>
-
-                    </div>
-
-
-                    <div class="metric-box">
-
-                        <div class="metric-val">
-                            ✅
-                        </div>
-
-                        <div class="metric-lbl">
-                            Status
-                        </div>
-
-                    </div>
-
+                """
+                <div class="sec-head">
+                    <span>🤖 Agent Results</span>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
+
+            with st.expander("✈️ Flight Agent — View output", expanded=False):
+                st.markdown(
+                    collected["flight_results"] or "_No flight data returned._"
+                )
+
+            with st.expander("🏨 Hotel Agent — View output", expanded=False):
+                st.markdown(
+                    collected["hotel_results"] or "_No hotel data returned._"
+                )
+
+            with st.expander("🌦️ Weather Agent — View output", expanded=False):
+                st.markdown(
+                    collected["weather_results"] or "_No weather data returned._"
+                )
+
+            with st.expander("🗓️ Itinerary Agent — View raw output", expanded=False):
+                st.markdown(
+                    collected["itinerary"] or "_No itinerary generated._"
+                )
 
 
             # ==================================================
@@ -1216,7 +1192,7 @@ if generate:
             file_content = f"""
 # AI Travel Plan
 
-**Query:** {user_query}
+**Query:** {planning_query or user_query}
 
 **Generated:** {
     datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1248,9 +1224,6 @@ if generate:
 
 {collected["itinerary"] or "N/A"}
 
----
-
-**LLM Calls:** {collected["llm_calls"]}
 """
 
 

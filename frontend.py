@@ -915,7 +915,8 @@ with st.form("travel_planning_form"):
 planning_query = ""
 
 if generate and user_query.strip() and end_date >= start_date:
-    trip_days = (end_date - start_date).days + 1
+    calendar_days = (end_date - start_date).days + 1
+    nights = (end_date - start_date).days
 
     departure_text = (
         departure_city.strip()
@@ -938,18 +939,24 @@ CONFIRMED USER-PROVIDED PLANNING DETAILS
 - Departure city: {departure_text}
 - Start date: {start_date.isoformat()}
 - Return date: {end_date.isoformat()}
-- Trip duration: {trip_days} calendar day(s), counting both dates
+- Calendar dates covered: {calendar_days} days, including departure and return dates
+- Nights between selected dates: {nights}
 - Number of travelers: {travelers}
 - Total budget: {budget_text}
 
 PLANNING RULES
-- Use the dates and traveler count above.
-- Do not invent a departure city, airport, booking, or reservation.
+- Treat the selected dates as authoritative.
+- Distinguish sightseeing days from travel days.
+- Do not claim the trip has a specific number of sightseeing days unless the user explicitly requests that number.
+- The itinerary must begin on the selected departure date and finish on the selected return date.
+- Do not schedule activities after the return flight departure.
+- Do not invent a departure city, airport, booking, reservation, or flight departure/arrival times.
 - If the departure city is not specified, clearly say so.
 - Keep the itinerary within the selected date range.
 - Do not add extra travel days outside the selected dates.
 - Label unverified prices, schedules, and availability as estimates.
-- If the request conflicts with the selected dates, explain the conflict.
+- Mark flight times as illustrative unless verified by a live flight source.
+- If the written trip duration conflicts with the selected date range, explain the difference.
 """
 
 
@@ -1052,6 +1059,10 @@ if generate:
             "itinerary": "",
 
             "llm_calls": 0,
+            "flight_status": "not started",
+            "hotel_status": "not started",
+            "weather_status": "not started",
+            "itinerary_status": "not started",
 
         }
 
@@ -1089,20 +1100,32 @@ if generate:
                             collected["flight_results"] = state_update.get(
                                 "flight_results", ""
                             )
+                            collected["flight_status"] = state_update.get(
+                                "flight_status", "unknown"
+                            )
 
                         elif node_name == "hotel_agent":
                             collected["hotel_results"] = state_update.get(
                                 "hotel_results", ""
+                            )
+                            collected["hotel_status"] = state_update.get(
+                                "hotel_status", "unknown"
                             )
 
                         elif node_name == "weather_agent":
                             collected["weather_results"] = state_update.get(
                                 "weather_results", ""
                             )
+                            collected["weather_status"] = state_update.get(
+                                "weather_status", "unknown"
+                            )
 
                         elif node_name == "itinerary_agent":
                             collected["itinerary"] = state_update.get(
                                 "itinerary", ""
+                            )
+                            collected["itinerary_status"] = state_update.get(
+                                "itinerary_status", "unknown"
                             )
 
                         collected["llm_calls"] = state_update.get(
@@ -1120,21 +1143,25 @@ if generate:
             )
 
             with st.expander("✈️ Flight Agent — View output", expanded=False):
+                st.caption(f"Status: {collected['flight_status']}")
                 st.markdown(
                     collected["flight_results"] or "_No flight data returned._"
                 )
 
             with st.expander("🏨 Hotel Agent — View output", expanded=False):
+                st.caption(f"Status: {collected['hotel_status']}")
                 st.markdown(
                     collected["hotel_results"] or "_No hotel data returned._"
                 )
 
             with st.expander("🌦️ Weather Agent — View output", expanded=False):
+                st.caption(f"Status: {collected['weather_status']}")
                 st.markdown(
                     collected["weather_results"] or "_No weather data returned._"
                 )
 
             with st.expander("🗓️ Itinerary Agent — View raw output", expanded=False):
+                st.caption(f"Status: {collected['itinerary_status']}")
                 st.markdown(
                     collected["itinerary"] or "_No itinerary generated._"
                 )
@@ -1145,34 +1172,19 @@ if generate:
             # ==================================================
 
             if collected["itinerary"]:
-
                 st.markdown(
                     """
                     <div class="sec-head">
-                        <span>
-                            🧠 Final Travel Plan
-                        </span>
+                        <span>🧠 Your Travel Plan</span>
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
 
-
-                st.markdown(
-                    '<div class="final-card">',
-                    unsafe_allow_html=True,
-                )
-
-
-                st.markdown(
-                    collected["itinerary"]
-                )
-
-
-                st.markdown(
-                    "</div>",
-                    unsafe_allow_html=True,
-                )
+                # Use a native Streamlit container so Markdown headings, tables,
+                # lists, and links render cleanly inside the plan card.
+                with st.container(border=True):
+                    st.markdown(collected["itinerary"])
 
 
             # ==================================================

@@ -11,3 +11,6 @@ mcp[cli]
 
 python-dotenv
 requests
+
+tenacity
+pytest

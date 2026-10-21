@@ -1,7 +1,7 @@
 .env
-/aviationstack-mcp/
-/tools/
-__pycache__/
-*.pyc
 .venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
 .DS_Store

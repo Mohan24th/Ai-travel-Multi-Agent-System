@@ -64,7 +64,7 @@ class TravelState(TypedDict):
 
     itinerary: str
 
-    llm_calls: int
+    llm_calls: Annotated[int, operator.add]
 
 
 # ============================================================
@@ -312,74 +312,34 @@ Requirements:
 
 
 # ============================================================
-# LANGGRAPH
+# LANGGRAPH — PARALLEL RESEARCH WORKFLOW
 # ============================================================
 
 graph = StateGraph(TravelState)
 
+graph.add_node("flight_agent", flight_agent)
+graph.add_node("hotel_agent", hotel_agent)
+graph.add_node("weather_agent", weather_agent)
+graph.add_node("itinerary_agent", itinerary_agent)
 
-graph.add_node(
-    "flight_agent",
-    flight_agent,
-)
+# Run all independent research agents concurrently.
+graph.add_edge(START, "flight_agent")
+graph.add_edge(START, "hotel_agent")
+graph.add_edge(START, "weather_agent")
 
-graph.add_node(
-    "hotel_agent",
-    hotel_agent,
-)
-
-graph.add_node(
-    "weather_agent",
-    weather_agent,
-)
-
-graph.add_node(
-    "itinerary_agent",
-    itinerary_agent,
-)
-
-
-# ============================================================
-# WORKFLOW
-# ============================================================
-
+# Wait for all three agents before generating the itinerary.
 graph.add_edge(
-    START,
-    "flight_agent",
-)
-
-graph.add_edge(
-    "flight_agent",
-    "hotel_agent",
-)
-
-graph.add_edge(
-    "hotel_agent",
-    "weather_agent",
-)
-
-graph.add_edge(
-    "weather_agent",
+    ["flight_agent", "hotel_agent", "weather_agent"],
     "itinerary_agent",
 )
 
-graph.add_edge(
-    "itinerary_agent",
-    END,
-)
+graph.add_edge("itinerary_agent", END)
 
 
 # ============================================================
 # IN-MEMORY CHECKPOINT
 # ============================================================
 
-# No PostgreSQL.
-# No psycopg.
-# No DATABASE_URL.
-
 checkpointer = MemorySaver()
 
-
-app = graph.compile(
-    checkpointer=checkpointer,
-)
+app = graph.compile(checkpointer=checkpointer)
